@@ -1,0 +1,33 @@
+{
+  "originHash" : "5d519308b68fc2869f7407be2d8e0fd8abf39b4f9755bd6d0426db4186de4349",
+  "pins" : [
+    {
+      "identity" : "cglfw3",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/IIMrFreemanII/CGLFW3",
+      "state" : {
+        "branch" : "main",
+        "revision" : "68edd2b3ffc2b25f09e92653565559b272b62fcc"
+      }
+    },
+    {
+      "identity" : "cvulkan",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/IIMrFreemanII/CVulkan",
+      "state" : {
+        "branch" : "main",
+        "revision" : "36502ba68f5d77b11a1f9494e5b519e5a9894186"
+      }
+    },
+    {
+      "identity" : "swiftglm",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/IIMrFreemanII/SwiftGLM",
+      "state" : {
+        "branch" : "main",
+        "revision" : "fedb4b536e584f74e81e9b624396d2689c1aa3cf"
+      }
+    }
+  ],
+  "version" : 3
+}

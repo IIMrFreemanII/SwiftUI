@@ -22,6 +22,13 @@ let package = Package(
                 "CGLFW3", 
                 "SwiftGLM",
                 "CVulkan"
+            ],
+            cSettings: [
+                .unsafeFlags(["-I", "C:\\VulkanSDK\\1.3.211.0\\Include"], .when(platforms: [.windows]))
+            ],
+            linkerSettings: [
+                .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "/usr/local/lib", "-lvulkan"], .when(platforms: [.macOS])),
+                .unsafeFlags(["-L", "C:\\VulkanSDK\\1.3.211.0\\Lib", "-lvulkan-1"], .when(platforms: [.windows]))
             ] 
         ),
     ]

@@ -1,5 +1,5 @@
 {
-  "originHash" : "d0d50227d718cabcf4f86b1ed4d82eb5b04bfd0d3e8cf3666507fee7671ff931",
+  "originHash" : "a8f3766008bb38659a327f561d0be218a0fcb3d8b1934ddabbf65bf7256c29f2",
   "pins" : [
     {
       "identity" : "cglfw3",
@@ -16,7 +16,7 @@
       "location" : "https://github.com/IIMrFreemanII/CVulkan",
       "state" : {
         "branch" : "main",
-        "revision" : "8bee16d737a337154667e8d7e36854652b456a1c"
+        "revision" : "915e63e3c19069e92b0c989cc495c803fb63bd2e"
       }
     },
     {

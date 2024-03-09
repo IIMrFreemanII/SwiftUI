@@ -1,11 +1,10 @@
 // The Swift Programming Language
 // https://docs.swift.org/swift-book
-import CGLFW3
-import SwiftGLM
+
 import CVulkan
 
 @main
-struct App {
+struct Root {
   static func test() {
     var appInfo = VkApplicationInfo()
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO
@@ -51,28 +50,32 @@ struct App {
     // Clean up
     vkDestroyInstance(instance, nil)
   }
+
   static func main() {
-    Self.test()
+    let app = Application()
+    app.run()
 
-    glfwInit()
+    // Self.test()
+
+    // glfwInit()
       
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4)
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1)
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE)
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE)
+    // glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4)
+    // glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1)
+    // glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE)
+    // glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE)
     
-    guard let window = glfwCreateWindow(800, 600, "Hello World", nil, nil) else {
-        let error = glfwGetError(nil)
-        print(error)
-        return
-    }
+    // guard let window = glfwCreateWindow(800, 600, "Hello World", nil, nil) else {
+    //     let error = glfwGetError(nil)
+    //     print(error)
+    //     return
+    // }
 
-    glfwMakeContextCurrent(window)
-    while glfwWindowShouldClose(window) == GLFW_FALSE {
-        glfwSwapBuffers(window)
-        glfwPollEvents()
-    }
+    // glfwMakeContextCurrent(window)
+    // while glfwWindowShouldClose(window) == GLFW_FALSE {
+    //     glfwSwapBuffers(window)
+    //     glfwPollEvents()
+    // }
     
-    glfwTerminate()
+    // glfwTerminate()
   }
 }

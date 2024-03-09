@@ -24,11 +24,12 @@ let package = Package(
                 "CVulkan"
             ],
             cSettings: [
-                .unsafeFlags(["-I", "C:\\VulkanSDK\\1.3.211.0\\Include"], .when(platforms: [.windows]))
+                .unsafeFlags(["-I", "C:\\VulkanSDK\\1.3.275.0\\Include"], .when(platforms: [.windows])),
+                .define("GLFW_INCLUDE_VULKAN")
             ],
             linkerSettings: [
                 .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "/usr/local/lib", "-lvulkan"], .when(platforms: [.macOS])),
-                .unsafeFlags(["-L", "C:\\VulkanSDK\\1.3.211.0\\Lib", "-lvulkan-1"], .when(platforms: [.windows]))
+                .unsafeFlags(["-L", "C:\\VulkanSDK\\1.3.275.0\\Lib", "-lvulkan-1"], .when(platforms: [.windows]))
             ] 
         ),
     ]

@@ -6,7 +6,7 @@ class Application {
   let HEIGHT: Int32 = 600
   var window: OpaquePointer?
   var instance: VkInstance?
-  var validationLayers = [
+  var validationLayers: [UnsafePointer<CChar>?] = [
     "VK_LAYER_KHRONOS_validation".cString
   ]
 
@@ -43,7 +43,7 @@ class Application {
           }
         }
 
-        if item == layerName.string {
+        if item == layerName!.string {
           layerFound = true
           break
         }
@@ -97,10 +97,16 @@ class Application {
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO
     createInfo.pApplicationInfo = withUnsafePointer(to: &appInfo) { $0 }
     createInfo.enabledExtensionCount = UInt32(requiredExtensions.count)
-    createInfo.enabledLayerCount = 0
+
     createInfo.ppEnabledExtensionNames =
       requiredExtensions.withUnsafeBufferPointer { $0 }.baseAddress
     createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR.rawValue
+    if self.enableValidationLayers {
+      createInfo.enabledLayerCount = UInt32(self.validationLayers.count)
+      createInfo.ppEnabledLayerNames = self.validationLayers.withUnsafeBufferPointer { $0 }.baseAddress
+    } else {
+      createInfo.enabledLayerCount = 0
+    }
 
     let result = vkCreateInstance(&createInfo, nil, &self.instance)
     if result != VK_SUCCESS {

@@ -17,6 +17,10 @@ class Application {
   var device: VkDevice!
   var graphicsQueue: VkQueue!
   var presentQueue: VkQueue!
+  var swapChain: VkSwapchainKHR!
+  var swapChainImages: [VkImage?] = []
+  var swapChainImageFormat: VkFormat!
+  var swapChainExtent: VkExtent2D!
 
   #if DEBUG
     var enableValidationLayers = true
@@ -36,6 +40,7 @@ class Application {
     createSurface()
     pickPhysicalDevice()
     createLogicalDevice()
+    createSwapChain()
   }
 
   func checkDeviceExtensionSupport(_ device: VkPhysicalDevice) -> Bool {
@@ -68,7 +73,14 @@ class Application {
 
     let extensionsSupported = checkDeviceExtensionSupport(device)
 
-    return indices.isComplete && extensionsSupported
+    var swapChainAdequate = false
+    if extensionsSupported {
+      let swapChainSupport = querySwapChainSupport(device)
+      swapChainAdequate =
+        !swapChainSupport.formats.isEmpty && !swapChainSupport.presentModes.isEmpty
+    }
+
+    return indices.isComplete && extensionsSupported && swapChainAdequate
   }
 
   // temp
@@ -89,6 +101,145 @@ class Application {
 
   //   return score
   // }
+
+  func chooseSwapPresentMode(_ availablePresentModes: inout [VkPresentModeKHR]) -> VkPresentModeKHR
+  {
+    for availablePresentMode in availablePresentModes {
+      if availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR {
+        return availablePresentMode
+      }
+    }
+
+    return VK_PRESENT_MODE_FIFO_KHR
+  }
+
+  func chooseSwapSurfaceFormat(_ availableFormats: inout [VkSurfaceFormatKHR]) -> VkSurfaceFormatKHR
+  {
+    for availableFormat in availableFormats {
+      if availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB
+        && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
+      {
+        return availableFormat
+      }
+    }
+
+    return availableFormats[0]
+  }
+
+  func chooseSwapExtent(_ capabilities: inout VkSurfaceCapabilitiesKHR) -> VkExtent2D {
+    if capabilities.currentExtent.width != UINT32_MAX {
+      return capabilities.currentExtent
+    } else {
+      var width = Int32()
+      var height = Int32()
+      glfwGetFramebufferSize(window, &width, &height)
+
+      var actualExtent = VkExtent2D(width: UInt32(width), height: UInt32(height))
+      actualExtent.width = actualExtent.width.clamp(
+        capabilities.minImageExtent.width, capabilities.maxImageExtent.width)
+      actualExtent.height = actualExtent.height.clamp(
+        capabilities.minImageExtent.height, capabilities.maxImageExtent.height)
+
+      return actualExtent
+    }
+  }
+
+  func createSwapChain() {
+    var swapChainSupport = querySwapChainSupport(self.physicalDevice)
+
+    var surfaceFormat: VkSurfaceFormatKHR = chooseSwapSurfaceFormat(&swapChainSupport.formats)
+    var presentMode: VkPresentModeKHR = chooseSwapPresentMode(&swapChainSupport.presentModes)
+    var extent: VkExtent2D = chooseSwapExtent(&swapChainSupport.capabilities)
+
+    var imageCount = swapChainSupport.capabilities.minImageCount + 1
+    if swapChainSupport.capabilities.maxImageCount > 0
+      && imageCount > swapChainSupport.capabilities.maxImageCount
+    {
+      imageCount = swapChainSupport.capabilities.maxImageCount
+    }
+
+    var createInfo = VkSwapchainCreateInfoKHR()
+    createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR
+    createInfo.surface = self.surface
+
+    createInfo.minImageCount = imageCount
+    createInfo.imageFormat = surfaceFormat.format
+    createInfo.imageColorSpace = surfaceFormat.colorSpace
+    createInfo.imageExtent = extent
+    createInfo.imageArrayLayers = 1
+    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue
+
+    var indices = findQueueFamilies(self.physicalDevice)
+    var queueFamilyIndices: [UInt32] = [indices.graphicsFamily!, indices.presentFamily!]
+    if indices.graphicsFamily! != indices.presentFamily! {
+      createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT
+      createInfo.queueFamilyIndexCount = 2
+      createInfo.pQueueFamilyIndices = queueFamilyIndices.withUnsafeBufferPointer { $0 }.baseAddress
+    } else {
+      createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE
+      createInfo.queueFamilyIndexCount = 0  // Optional
+      createInfo.pQueueFamilyIndices = nil  // Optional
+    }
+
+    createInfo.preTransform = swapChainSupport.capabilities.currentTransform
+    createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+    createInfo.presentMode = presentMode
+    createInfo.clipped = VK_TRUE
+    createInfo.oldSwapchain = nil
+
+    if vkCreateSwapchainKHR(self.device, &createInfo, nil, &self.swapChain) != VK_SUCCESS {
+      fatalError("Failed to create swap chain!")
+    }
+    print("Swap chain: \(self.swapChain!)")
+
+    vkGetSwapchainImagesKHR(self.device, self.swapChain, &imageCount, nil)
+    self.swapChainImages = Array(repeating: nil, count: Int(imageCount))
+    vkGetSwapchainImagesKHR(device, swapChain, &imageCount, &self.swapChainImages)
+    print("swapChainImages: \(self.swapChainImages)")
+
+    self.swapChainImageFormat = surfaceFormat.format
+    self.swapChainExtent = extent
+
+    print("swapChainImageFormat: \(self.swapChainImageFormat!)")
+    print("swapChainExtent: \(self.swapChainExtent!)")
+  }
+
+  struct SwapChainSupportDetails {
+    var capabilities = VkSurfaceCapabilitiesKHR()
+    var formats: [VkSurfaceFormatKHR] = []
+    var presentModes: [VkPresentModeKHR] = []
+  }
+
+  func querySwapChainSupport(_ device: VkPhysicalDevice) -> SwapChainSupportDetails {
+    var details = SwapChainSupportDetails()
+
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, self.surface, &details.capabilities)
+
+    var formatCount = UInt32()
+    vkGetPhysicalDeviceSurfaceFormatsKHR(device, self.surface, &formatCount, nil)
+
+    if formatCount != 0 {
+      details.formats = Array(repeating: VkSurfaceFormatKHR(), count: Int(formatCount))
+      vkGetPhysicalDeviceSurfaceFormatsKHR(device, self.surface, &formatCount, &details.formats)
+    } else {
+      fatalError("Failed to find suitable swap chain format")
+    }
+
+    var presentModeCount = UInt32()
+    vkGetPhysicalDeviceSurfacePresentModesKHR(device, self.surface, &presentModeCount, nil)
+
+    if presentModeCount != 0 {
+      details.presentModes = Array(
+        repeating: VkPresentModeKHR(VK_PRESENT_MODE_IMMEDIATE_KHR.rawValue),
+        count: Int(presentModeCount))
+      vkGetPhysicalDeviceSurfacePresentModesKHR(
+        device, self.surface, &presentModeCount, &details.presentModes)
+    } else {
+      fatalError("Failed to find suitable swap chain present mode")
+    }
+
+    return details
+  }
 
   struct QueueFamilyIndices {
     var graphicsFamily: UInt32?
@@ -357,6 +508,7 @@ class Application {
   }
 
   func cleanup() {
+    vkDestroySwapchainKHR(self.device, self.swapChain, nil)
     vkDestroyDevice(self.device, nil)
     vkDestroySurfaceKHR(self.instance, self.surface, nil)
     vkDestroyInstance(self.instance, nil)

@@ -23,6 +23,7 @@ let package = Package(
         "SwiftGLM",
         "CVulkan",
       ],
+      resources: [.copy("Resources")],
       cSettings: [
         .unsafeFlags(["-I", "C:\\VulkanSDK\\1.3.275.0\\Include"], .when(platforms: [.windows])),
         .define("GLFW_INCLUDE_VULKAN"),

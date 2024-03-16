@@ -1,5 +1,6 @@
 import CGLFW3
 import CVulkan
+import Foundation
 
 class Application {
   let WIDTH: Int32 = 800
@@ -21,6 +22,7 @@ class Application {
   var swapChainImages: [VkImage?] = []
   var swapChainImageFormat: VkFormat!
   var swapChainExtent: VkExtent2D!
+  var swapChainImageViews: [VkImageView?] = []
 
   #if DEBUG
     var enableValidationLayers = true
@@ -41,6 +43,58 @@ class Application {
     pickPhysicalDevice()
     createLogicalDevice()
     createSwapChain()
+    createImageViews()
+    createGraphicsPipeline()
+  }
+
+  func createGraphicsPipeline() {
+    let resourceURL = Bundle.module.url(
+      forResource: "Resources/Shaders/shader", withExtension: "vert")
+    guard let resourceURL = resourceURL else {
+      print("File not found")
+      return
+    }
+    print("resourceURL: \(resourceURL)")
+    do {
+      let data = try Data(contentsOf: resourceURL)
+      // Process the data here (e.g., decode JSON using JSONDecoder)
+      if let myString = String(data: data, encoding: .utf8) {
+        print(myString)  // The converted string
+      } else {
+        print("Conversion failed.")
+      }
+    } catch {
+      print("Error reading file: \(error)")
+    }
+  }
+
+  func createImageViews() {
+    self.swapChainImageViews = Array(repeating: nil, count: self.swapChainImages.count)
+
+    for (i, image) in self.swapChainImages.enumerated() {
+      var createInfo = VkImageViewCreateInfo()
+      createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
+      createInfo.image = image
+      createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D
+      createInfo.format = swapChainImageFormat
+
+      createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY
+      createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY
+      createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY
+      createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY
+
+      createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT.rawValue
+      createInfo.subresourceRange.baseMipLevel = 0
+      createInfo.subresourceRange.levelCount = 1
+      createInfo.subresourceRange.baseArrayLayer = 0
+      createInfo.subresourceRange.layerCount = 1
+
+      if vkCreateImageView(self.device, &createInfo, nil, &swapChainImageViews[i]) != VK_SUCCESS {
+        fatalError("Failed to create image views!")
+      }
+    }
+
+    print("swapChainImageViews: \(self.swapChainImageViews)")
   }
 
   func checkDeviceExtensionSupport(_ device: VkPhysicalDevice) -> Bool {
@@ -147,9 +201,9 @@ class Application {
   func createSwapChain() {
     var swapChainSupport = querySwapChainSupport(self.physicalDevice)
 
-    var surfaceFormat: VkSurfaceFormatKHR = chooseSwapSurfaceFormat(&swapChainSupport.formats)
-    var presentMode: VkPresentModeKHR = chooseSwapPresentMode(&swapChainSupport.presentModes)
-    var extent: VkExtent2D = chooseSwapExtent(&swapChainSupport.capabilities)
+    let surfaceFormat: VkSurfaceFormatKHR = chooseSwapSurfaceFormat(&swapChainSupport.formats)
+    let presentMode: VkPresentModeKHR = chooseSwapPresentMode(&swapChainSupport.presentModes)
+    let extent: VkExtent2D = chooseSwapExtent(&swapChainSupport.capabilities)
 
     var imageCount = swapChainSupport.capabilities.minImageCount + 1
     if swapChainSupport.capabilities.maxImageCount > 0
@@ -169,8 +223,8 @@ class Application {
     createInfo.imageArrayLayers = 1
     createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue
 
-    var indices = findQueueFamilies(self.physicalDevice)
-    var queueFamilyIndices: [UInt32] = [indices.graphicsFamily!, indices.presentFamily!]
+    let indices = findQueueFamilies(self.physicalDevice)
+    let queueFamilyIndices: [UInt32] = [indices.graphicsFamily!, indices.presentFamily!]
     if indices.graphicsFamily! != indices.presentFamily! {
       createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT
       createInfo.queueFamilyIndexCount = 2
@@ -508,6 +562,9 @@ class Application {
   }
 
   func cleanup() {
+    for imageView in self.swapChainImageViews {
+      vkDestroyImageView(self.device, imageView, nil)
+    }
     vkDestroySwapchainKHR(self.device, self.swapChain, nil)
     vkDestroyDevice(self.device, nil)
     vkDestroySurfaceKHR(self.instance, self.surface, nil)

@@ -47,9 +47,12 @@ class Application {
   }
 
   func createGraphicsPipeline() {
-    let file = FileUtils.loadFile("Resources/Shaders/shader.vert")
+    let file = FileUtils.loadFile("Resources/Shaders/default.vert")
     print("file: \(file!)")
-    ShaderUtils.compile("some path")
+    let defaultVert = ShaderUtils.compile("default.vert")
+    let defaultFrag = ShaderUtils.compile("default.frag")
+    print(defaultVert)
+    print(defaultFrag)
   }
 
   func createImageViews() {

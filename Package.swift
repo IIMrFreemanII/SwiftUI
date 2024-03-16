@@ -21,8 +21,7 @@ let package = Package(
       dependencies: [
         "CGLFW3",
         "SwiftGLM",
-        "CVulkan",
-        "ShellOut",
+        "CVulkan"
       ],
       resources: [.copy("Resources")],
       cSettings: [

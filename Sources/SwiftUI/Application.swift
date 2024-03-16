@@ -48,7 +48,7 @@ class Application {
 
   func createGraphicsPipeline() {
     let file = FileUtils.loadFile("Resources/Shaders/shader.vert")
-    print(file!)
+    print("file: \(file!)")
     ShaderUtils.compile("some path")
   }
 

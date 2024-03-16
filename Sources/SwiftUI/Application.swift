@@ -83,7 +83,7 @@ class Application {
       createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY
       createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY
 
-      createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT.rawValue
+      createInfo.subresourceRange.aspectMask = UInt32(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
       createInfo.subresourceRange.baseMipLevel = 0
       createInfo.subresourceRange.levelCount = 1
       createInfo.subresourceRange.baseArrayLayer = 0
@@ -221,7 +221,7 @@ class Application {
     createInfo.imageColorSpace = surfaceFormat.colorSpace
     createInfo.imageExtent = extent
     createInfo.imageArrayLayers = 1
-    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue
+    createInfo.imageUsage = UInt32(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue)
 
     let indices = findQueueFamilies(self.physicalDevice)
     let queueFamilyIndices: [UInt32] = [indices.graphicsFamily!, indices.presentFamily!]
@@ -314,7 +314,7 @@ class Application {
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, &queueFamilies)
 
     for (index, queueFamily) in queueFamilies.enumerated() {
-      if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT.rawValue) != 0 {
+      if (queueFamily.queueFlags & UInt32(VK_QUEUE_GRAPHICS_BIT.rawValue)) != 0 {
         indices.graphicsFamily = UInt32(index)
       }
 
@@ -506,7 +506,7 @@ class Application {
 
     createInfo.ppEnabledExtensionNames =
       requiredExtensions.withUnsafeBufferPointer { $0 }.baseAddress
-    createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR.rawValue
+    createInfo.flags |= UInt32(VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR.rawValue)
     if self.enableValidationLayers {
       createInfo.enabledLayerCount = UInt32(self.validationLayers.count)
       createInfo.ppEnabledLayerNames =

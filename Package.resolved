@@ -1,5 +1,5 @@
 {
-  "originHash" : "076e274d649569aaaf393cd20154836ba567bc0f4ff6299fb41831895470b556",
+  "originHash" : "9c48f81243d78681816f79f2cf47bf2272564061724710e4e5031b3d8e0c2323",
   "pins" : [
     {
       "identity" : "cglfw3",
@@ -17,6 +17,15 @@
       "state" : {
         "branch" : "main",
         "revision" : "915e63e3c19069e92b0c989cc495c803fb63bd2e"
+      }
+    },
+    {
+      "identity" : "shellout",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/JohnSundell/ShellOut.git",
+      "state" : {
+        "revision" : "e1577acf2b6e90086d01a6d5e2b8efdaae033568",
+        "version" : "2.3.0"
       }
     },
     {

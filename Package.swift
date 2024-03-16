@@ -12,6 +12,7 @@ let package = Package(
     .package(url: "https://github.com/IIMrFreemanII/CVulkan", branch: "main"),
     .package(url: "https://github.com/IIMrFreemanII/CGLFW3", branch: "main"),
     .package(url: "https://github.com/IIMrFreemanII/SwiftGLM", branch: "main"),
+    .package(url: "https://github.com/JohnSundell/ShellOut.git", from: "2.0.0"),
   ],
   targets: [
     // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -22,6 +23,7 @@ let package = Package(
         "CGLFW3",
         "SwiftGLM",
         "CVulkan",
+        "ShellOut",
       ],
       resources: [.copy("Resources")],
       cSettings: [

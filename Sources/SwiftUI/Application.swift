@@ -1,6 +1,5 @@
 import CGLFW3
 import CVulkan
-import Foundation
 
 class Application {
   let WIDTH: Int32 = 800
@@ -48,24 +47,9 @@ class Application {
   }
 
   func createGraphicsPipeline() {
-    let resourceURL = Bundle.module.url(
-      forResource: "Resources/Shaders/shader", withExtension: "vert")
-    guard let resourceURL = resourceURL else {
-      print("File not found")
-      return
-    }
-    print("resourceURL: \(resourceURL)")
-    do {
-      let data = try Data(contentsOf: resourceURL)
-      // Process the data here (e.g., decode JSON using JSONDecoder)
-      if let myString = String(data: data, encoding: .utf8) {
-        print(myString)  // The converted string
-      } else {
-        print("Conversion failed.")
-      }
-    } catch {
-      print("Error reading file: \(error)")
-    }
+    let file = FileUtils.loadFile("Resources/Shaders/shader.vert")
+    print(file!)
+    ShaderUtils.compile("some path")
   }
 
   func createImageViews() {

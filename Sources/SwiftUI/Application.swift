@@ -1,5 +1,6 @@
 import CGLFW3
 import CVulkan
+import Foundation
 
 class Application {
   let WIDTH: Int32 = 800
@@ -22,6 +23,9 @@ class Application {
   var swapChainImageFormat: VkFormat!
   var swapChainExtent: VkExtent2D!
   var swapChainImageViews: [VkImageView?] = []
+  var renderPass: VkRenderPass!
+  var pipelineLayout: VkPipelineLayout!
+  var graphicsPipeline: VkPipeline!
 
   #if DEBUG
     var enableValidationLayers = true
@@ -43,16 +47,208 @@ class Application {
     createLogicalDevice()
     createSwapChain()
     createImageViews()
+    createRenderPass()
     createGraphicsPipeline()
   }
 
+  func createRenderPass() {
+    var colorAttachment = VkAttachmentDescription()
+    colorAttachment.format = swapChainImageFormat
+    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE
+    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
+    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+
+    var colorAttachmentRef = VkAttachmentReference()
+    colorAttachmentRef.attachment = 0
+    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+
+    var subpass = VkSubpassDescription()
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS
+    subpass.colorAttachmentCount = 1
+    subpass.pColorAttachments = withUnsafePointer(to: &colorAttachmentRef) { $0 }
+
+    var renderPassInfo = VkRenderPassCreateInfo()
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
+    renderPassInfo.attachmentCount = 1
+    renderPassInfo.pAttachments = withUnsafePointer(to: &colorAttachment) { $0 }
+    renderPassInfo.subpassCount = 1
+    renderPassInfo.pSubpasses = withUnsafePointer(to: &subpass) { $0 }
+
+    if vkCreateRenderPass(self.device, &renderPassInfo, nil, &self.renderPass) != VK_SUCCESS {
+      fatalError("Failed to create render pass!")
+    }
+  }
+
   func createGraphicsPipeline() {
-    let file = FileUtils.loadFile("Shaders/default.vert")
-    print("file: \(file!)")
-    let defaultVert = ShaderUtils.compile("default.vert")
-    let defaultFrag = ShaderUtils.compile("default.frag")
-    print(defaultVert)
-    print(defaultFrag)
+    let defaultVert = ShaderUtils.compile("default.vert")!
+    let defaultFrag = ShaderUtils.compile("default.frag")!
+
+    let vertShaderModule = createShaderModule(defaultVert)
+    let fragShaderModule = createShaderModule(defaultFrag)
+
+    let funcName = "main".utf8CString
+    var vertShaderStageInfo = VkPipelineShaderStageCreateInfo()
+    vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
+    vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT
+    vertShaderStageInfo.module = vertShaderModule
+    vertShaderStageInfo.pName = funcName.cString
+
+    var fragShaderStageInfo = VkPipelineShaderStageCreateInfo()
+    fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
+    fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT
+    fragShaderStageInfo.module = fragShaderModule
+    fragShaderStageInfo.pName = funcName.cString
+
+    let shaderStages: [VkPipelineShaderStageCreateInfo] = [
+      vertShaderStageInfo, fragShaderStageInfo,
+    ]
+
+    var vertexInputInfo = VkPipelineVertexInputStateCreateInfo()
+    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
+    vertexInputInfo.vertexBindingDescriptionCount = 0
+    vertexInputInfo.pVertexBindingDescriptions = nil  // Optional
+    vertexInputInfo.vertexAttributeDescriptionCount = 0
+    vertexInputInfo.pVertexAttributeDescriptions = nil  // Optional
+
+    let dynamicStates: [VkDynamicState] = [
+      VK_DYNAMIC_STATE_VIEWPORT,
+      VK_DYNAMIC_STATE_SCISSOR,
+    ]
+
+    var dynamicState = VkPipelineDynamicStateCreateInfo()
+    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO
+    dynamicState.dynamicStateCount = UInt32(dynamicStates.count)
+    dynamicState.pDynamicStates = dynamicStates.withUnsafeBufferPointer { $0 }.baseAddress
+
+    var inputAssembly = VkPipelineInputAssemblyStateCreateInfo()
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+    inputAssembly.primitiveRestartEnable = VK_FALSE
+
+    var viewport = VkViewport()
+    viewport.x = 0
+    viewport.y = 0
+    viewport.width = Float(self.swapChainExtent.width)
+    viewport.height = Float(self.swapChainExtent.height)
+    viewport.minDepth = 0
+    viewport.maxDepth = 1
+
+    var scissor = VkRect2D()
+    scissor.offset = VkOffset2D(x: 0, y: 0)
+    scissor.extent = self.swapChainExtent
+
+    var viewportState = VkPipelineViewportStateCreateInfo()
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO
+    viewportState.viewportCount = 1
+    viewportState.pViewports = withUnsafePointer(to: &viewport) { $0 }
+    viewportState.scissorCount = 1
+    viewportState.pScissors = withUnsafePointer(to: &scissor) { $0 }
+
+    var rasterizer = VkPipelineRasterizationStateCreateInfo()
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO
+    rasterizer.depthClampEnable = VK_FALSE
+    rasterizer.rasterizerDiscardEnable = VK_FALSE
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL
+    rasterizer.lineWidth = 1
+    rasterizer.cullMode = UInt32(VK_CULL_MODE_BACK_BIT.rawValue)
+    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE
+    rasterizer.depthBiasEnable = VK_FALSE
+    rasterizer.depthBiasConstantFactor = 0  // Optional
+    rasterizer.depthBiasClamp = 0  // Optional
+    rasterizer.depthBiasSlopeFactor = 0  // Optional
+
+    var multisampling = VkPipelineMultisampleStateCreateInfo()
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO
+    multisampling.sampleShadingEnable = VK_FALSE
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT
+    multisampling.minSampleShading = 1  // Optional
+    multisampling.pSampleMask = nil  // Optional
+    multisampling.alphaToCoverageEnable = VK_FALSE  // Optional
+    multisampling.alphaToOneEnable = VK_FALSE  // Optional
+
+    var colorBlendAttachment = VkPipelineColorBlendAttachmentState()
+    colorBlendAttachment.colorWriteMask =
+      UInt32(VK_COLOR_COMPONENT_R_BIT.rawValue) | UInt32(VK_COLOR_COMPONENT_G_BIT.rawValue)
+      | UInt32(VK_COLOR_COMPONENT_B_BIT.rawValue)
+      | UInt32(VK_COLOR_COMPONENT_A_BIT.rawValue)
+    colorBlendAttachment.blendEnable = VK_TRUE
+    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA
+    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD
+    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE
+    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO
+    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD
+
+    var colorBlending = VkPipelineColorBlendStateCreateInfo()
+    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO
+    colorBlending.logicOpEnable = VK_FALSE
+    colorBlending.logicOp = VK_LOGIC_OP_COPY  // Optional
+    colorBlending.attachmentCount = 1
+    colorBlending.pAttachments = withUnsafePointer(to: &colorBlendAttachment) { $0 }
+    colorBlending.blendConstants.0 = 0  // Optional
+    colorBlending.blendConstants.1 = 0  // Optional
+    colorBlending.blendConstants.2 = 0  // Optional
+    colorBlending.blendConstants.3 = 0  // Optional
+
+    var pipelineLayoutInfo = VkPipelineLayoutCreateInfo()
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
+    pipelineLayoutInfo.setLayoutCount = 0  // Optional
+    pipelineLayoutInfo.pSetLayouts = nil  // Optional
+    pipelineLayoutInfo.pushConstantRangeCount = 0  // Optional
+    pipelineLayoutInfo.pPushConstantRanges = nil  // Optional
+
+    if vkCreatePipelineLayout(self.device, &pipelineLayoutInfo, nil, &self.pipelineLayout)
+      != VK_SUCCESS
+    {
+      fatalError("Failed to create pipeline layout!")
+    }
+
+    var pipelineInfo = VkGraphicsPipelineCreateInfo()
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO
+    pipelineInfo.stageCount = 2
+    pipelineInfo.pStages = shaderStages.withUnsafeBufferPointer { $0 }.baseAddress
+    pipelineInfo.pVertexInputState = withUnsafePointer(to: &vertexInputInfo) { $0 }
+    pipelineInfo.pInputAssemblyState = withUnsafePointer(to: &inputAssembly) { $0 }
+    pipelineInfo.pViewportState = withUnsafePointer(to: &viewportState) { $0 }
+    pipelineInfo.pRasterizationState = withUnsafePointer(to: &rasterizer) { $0 }
+    pipelineInfo.pMultisampleState = withUnsafePointer(to: &multisampling) { $0 }
+    pipelineInfo.pDepthStencilState = nil  // Optional
+    pipelineInfo.pColorBlendState = withUnsafePointer(to: &colorBlending) { $0 }
+    pipelineInfo.pDynamicState = withUnsafePointer(to: &dynamicState) { $0 }
+
+    pipelineInfo.layout = self.pipelineLayout
+
+    pipelineInfo.renderPass = self.renderPass
+    pipelineInfo.subpass = 0
+    pipelineInfo.basePipelineHandle = nil  // Optional
+    pipelineInfo.basePipelineIndex = -1  // Optional
+
+    if vkCreateGraphicsPipelines(self.device, nil, 1, &pipelineInfo, nil, &self.graphicsPipeline)
+      != VK_SUCCESS
+    {
+      fatalError("Failed to create graphics pipeline!")
+    }
+
+    vkDestroyShaderModule(self.device, fragShaderModule, nil)
+    vkDestroyShaderModule(self.device, vertShaderModule, nil)
+  }
+
+  func createShaderModule(_ code: Data) -> VkShaderModule {
+    var createInfo = VkShaderModuleCreateInfo()
+    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO
+    createInfo.codeSize = code.count
+    createInfo.pCode = code.withUnsafeBytes { $0.bindMemory(to: UInt32.self).baseAddress! }
+
+    var shaderModule: VkShaderModule? = nil
+    if vkCreateShaderModule(self.device, &createInfo, nil, &shaderModule) != VK_SUCCESS {
+      fatalError("Failed to create shader module!")
+    }
+
+    return shaderModule!
   }
 
   func createImageViews() {
@@ -456,9 +652,11 @@ class Application {
 
     var appInfo = VkApplicationInfo()
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO
-    appInfo.pApplicationName = "Hello Vulkan".cString
+    let pApplicationName = "Hello Vulkan".utf8CString
+    appInfo.pApplicationName = pApplicationName.cString
     appInfo.applicationVersion = vkMakeVersion(1, 0, 0)
-    appInfo.pEngineName = "No Engine".cString
+    let pEngineName = "No Engine".utf8CString
+    appInfo.pEngineName = pEngineName.cString
     appInfo.engineVersion = vkMakeVersion(1, 0, 0)
     appInfo.apiVersion = vkMakeApiVersion(0, 1, 0, 0)
 
@@ -482,7 +680,7 @@ class Application {
     print("Required instance extensions:")
     for (i, cString) in requiredExtensions.enumerated() {
       if let cString = cString {
-        print("  \(i + 1):\(cString.string)")
+        print("  \(i + 1): \(cString.string)")
       }
     }
 
@@ -549,6 +747,9 @@ class Application {
   }
 
   func cleanup() {
+    vkDestroyPipeline(self.device, self.graphicsPipeline, nil)
+    vkDestroyPipelineLayout(self.device, self.pipelineLayout, nil)
+    vkDestroyRenderPass(self.device, self.renderPass, nil)
     for imageView in self.swapChainImageViews {
       vkDestroyImageView(self.device, imageView, nil)
     }

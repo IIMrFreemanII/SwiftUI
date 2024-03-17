@@ -9,3 +9,9 @@ extension UnsafePointer<CChar> {
     String(cString: self)
   }
 }
+
+extension ContiguousArray<CChar> {
+  var cString: UnsafePointer<CChar> {
+    self.withUnsafeBufferPointer { $0.baseAddress! }
+  }
+}

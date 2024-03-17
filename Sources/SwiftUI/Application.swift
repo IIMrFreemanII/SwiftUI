@@ -5,6 +5,7 @@ import Foundation
 class Application {
   let MAX_FRAMES_IN_FLIGHT: Int = 2
   var currentFrame: UInt32 = 0
+  var framebufferResized = false
   let WIDTH: Int32 = 800
   let HEIGHT: Int32 = 600
   var window: OpaquePointer!
@@ -64,6 +65,13 @@ class Application {
   }
 
   func cleanup() {
+    self.cleanupSwapChain()
+
+    vkDestroyPipeline(self.device, self.graphicsPipeline, nil)
+    vkDestroyPipelineLayout(self.device, self.pipelineLayout, nil)
+
+    vkDestroyRenderPass(self.device, self.renderPass, nil)
+
     for i in 0..<self.MAX_FRAMES_IN_FLIGHT {
       vkDestroySemaphore(self.device, self.imageAvailableSemaphores[i], nil)
       vkDestroySemaphore(self.device, self.renderFinishedSemaphores[i], nil)
@@ -71,19 +79,12 @@ class Application {
     }
 
     vkDestroyCommandPool(self.device, self.commandPool, nil)
-    for framebuffer in self.swapChainFramebuffers {
-      vkDestroyFramebuffer(self.device, framebuffer, nil)
-    }
-    vkDestroyPipeline(self.device, self.graphicsPipeline, nil)
-    vkDestroyPipelineLayout(self.device, self.pipelineLayout, nil)
-    vkDestroyRenderPass(self.device, self.renderPass, nil)
-    for imageView in self.swapChainImageViews {
-      vkDestroyImageView(self.device, imageView, nil)
-    }
-    vkDestroySwapchainKHR(self.device, self.swapChain, nil)
+
     vkDestroyDevice(self.device, nil)
+
     vkDestroySurfaceKHR(self.instance, self.surface, nil)
     vkDestroyInstance(self.instance, nil)
+
     glfwDestroyWindow(self.window)
 
     glfwTerminate()
@@ -102,11 +103,22 @@ class Application {
     let currentFrame = Int(self.currentFrame)
 
     vkWaitForFences(self.device, 1, &self.inFlightFences[currentFrame], VK_TRUE, UINT64_MAX)
-    vkResetFences(self.device, 1, &self.inFlightFences[currentFrame])
 
     var imageIndex = UInt32()
-    vkAcquireNextImageKHR(
-      self.device, self.swapChain, UINT64_MAX, self.imageAvailableSemaphores[currentFrame], nil, &imageIndex)
+    var result = vkAcquireNextImageKHR(
+      self.device, self.swapChain, UINT64_MAX, self.imageAvailableSemaphores[currentFrame], nil,
+      &imageIndex)
+    if result == VK_ERROR_OUT_OF_DATE_KHR {
+      print("recreateSwapChain after vkAcquireNextImageKHR")
+      // ?? self.framebufferResized = false;
+      self.recreateSwapChain()
+      return
+    } else if result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR {
+      fatalError("Failed to acquire swap chain image!")
+    }
+
+    // Only reset the fence if we are submitting work
+    vkResetFences(self.device, 1, &self.inFlightFences[currentFrame])
 
     vkResetCommandBuffer(self.commandBuffers[currentFrame], 0)
     recordCommandBuffer(self.commandBuffers[currentFrame]!, imageIndex)
@@ -129,7 +141,9 @@ class Application {
     submitInfo.signalSemaphoreCount = 1
     submitInfo.pSignalSemaphores = signalSemaphores.withUnsafeBufferPointer { $0.baseAddress! }
 
-    if vkQueueSubmit(self.graphicsQueue, 1, &submitInfo, self.inFlightFences[currentFrame]) != VK_SUCCESS {
+    if vkQueueSubmit(self.graphicsQueue, 1, &submitInfo, self.inFlightFences[currentFrame])
+      != VK_SUCCESS
+    {
       fatalError("Failed to submit draw command buffer!")
     }
 
@@ -144,7 +158,15 @@ class Application {
     presentInfo.pImageIndices = withUnsafePointer(to: &imageIndex) { $0 }
     presentInfo.pResults = nil
 
-    vkQueuePresentKHR(self.presentQueue, &presentInfo)
+    result = vkQueuePresentKHR(self.presentQueue, &presentInfo)
+    if result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || self.framebufferResized
+    {
+      print("recreateSwapChain after vkQueuePresentKHR")
+      self.framebufferResized = false
+      self.recreateSwapChain()
+    } else if result != VK_SUCCESS {
+      fatalError("Failed to present swap chain image!")
+    }
 
     self.currentFrame = (self.currentFrame + 1) % UInt32(self.MAX_FRAMES_IN_FLIGHT)
   }
@@ -259,7 +281,7 @@ class Application {
     self.swapChainFramebuffers = Array(repeating: nil, count: self.swapChainImageViews.count)
 
     for (i, _) in self.swapChainImageViews.enumerated() {
-      var attachments: [VkImageView?] = [
+      let attachments: [VkImageView?] = [
         self.swapChainImageViews[i]
       ]
 
@@ -620,6 +642,36 @@ class Application {
     }
   }
 
+  func cleanupSwapChain() {
+    for i in 0..<self.swapChainFramebuffers.count {
+      vkDestroyFramebuffer(self.device, self.swapChainFramebuffers[i], nil)
+    }
+    for i in 0..<self.swapChainImageViews.count {
+      vkDestroyImageView(self.device, self.swapChainImageViews[i], nil)
+    }
+
+    vkDestroySwapchainKHR(self.device, self.swapChain, nil)
+  }
+
+  func recreateSwapChain() {
+    // handle minimization
+    var width: Int32 = 0
+    var height: Int32 = 0
+    glfwGetFramebufferSize(self.window, &width, &height)
+    while width == 0 || height == 0 {
+      glfwGetFramebufferSize(self.window, &width, &height)
+      glfwWaitEvents()
+    }
+
+    vkDeviceWaitIdle(self.device)
+
+    self.cleanupSwapChain()
+
+    self.createSwapChain()
+    self.createImageViews()
+    self.createFrameBuffers()
+  }
+
   func createSwapChain() {
     var swapChainSupport = querySwapChainSupport(self.physicalDevice)
 
@@ -974,8 +1026,18 @@ class Application {
     glfwInit()
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
 
-    window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nil, nil)
+    self.window = glfwCreateWindow(self.WIDTH, self.HEIGHT, "Vulkan", nil, nil)
+    let app = Unmanaged.passUnretained(self).toOpaque()
+    glfwSetWindowUserPointer(window, app)
+    print("framebufferResizeCallback app: \(app)")
+    glfwSetFramebufferSizeCallback(self.window, framebufferResizeCallback)
   }
+}
+
+func framebufferResizeCallback(_ window: OpaquePointer?, _ width: Int32, _ height: Int32) {
+  print("framebufferResizeCallback width:\(width), height: \(height)")
+  let appPointer = glfwGetWindowUserPointer(window)!
+  let app = Unmanaged<Application>.fromOpaque(appPointer).takeUnretainedValue()
+  app.framebufferResized = true
 }

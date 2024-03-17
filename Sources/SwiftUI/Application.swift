@@ -26,6 +26,12 @@ class Application {
   var renderPass: VkRenderPass!
   var pipelineLayout: VkPipelineLayout!
   var graphicsPipeline: VkPipeline!
+  var swapChainFramebuffers: [VkFramebuffer?] = []
+  var commandPool: VkCommandPool!
+  var commandBuffer: VkCommandBuffer!
+  var imageAvailableSemaphore: VkSemaphore!
+  var renderFinishedSemaphore: VkSemaphore!
+  var inFlightFence: VkFence!
 
   #if DEBUG
     var enableValidationLayers = true
@@ -34,24 +40,237 @@ class Application {
   #endif
 
   func run() {
-    initWindow()
-    initVulkan()
-    mainLoop()
-    cleanup()
+    self.initWindow()
+    self.initVulkan()
+    self.mainLoop()
+    self.cleanup()
   }
 
   func initVulkan() {
-    createInstance()
-    createSurface()
-    pickPhysicalDevice()
-    createLogicalDevice()
-    createSwapChain()
-    createImageViews()
-    createRenderPass()
-    createGraphicsPipeline()
+    self.createInstance()
+    self.createSurface()
+    self.pickPhysicalDevice()
+    self.createLogicalDevice()
+    self.createSwapChain()
+    self.createImageViews()
+    self.createRenderPass()
+    self.createGraphicsPipeline()
+    self.createFrameBuffers()
+    self.createCommandPool()
+    self.createCommandBuffer()
+    self.createSyncObjects()
+  }
+
+  func cleanup() {
+    vkDestroySemaphore(self.device, self.imageAvailableSemaphore, nil)
+    vkDestroySemaphore(self.device, self.renderFinishedSemaphore, nil)
+    vkDestroyFence(self.device, self.inFlightFence, nil)
+    vkDestroyCommandPool(self.device, self.commandPool, nil)
+    for framebuffer in self.swapChainFramebuffers {
+      vkDestroyFramebuffer(self.device, framebuffer, nil)
+    }
+    vkDestroyPipeline(self.device, self.graphicsPipeline, nil)
+    vkDestroyPipelineLayout(self.device, self.pipelineLayout, nil)
+    vkDestroyRenderPass(self.device, self.renderPass, nil)
+    for imageView in self.swapChainImageViews {
+      vkDestroyImageView(self.device, imageView, nil)
+    }
+    vkDestroySwapchainKHR(self.device, self.swapChain, nil)
+    vkDestroyDevice(self.device, nil)
+    vkDestroySurfaceKHR(self.instance, self.surface, nil)
+    vkDestroyInstance(self.instance, nil)
+    glfwDestroyWindow(self.window)
+
+    glfwTerminate()
+  }
+
+  func mainLoop() {
+    while glfwWindowShouldClose(window) == GLFW_FALSE {
+      glfwPollEvents()
+      self.drawFrame()
+    }
+
+    vkDeviceWaitIdle(self.device);
+  }
+
+  func drawFrame() {
+    vkWaitForFences(self.device, 1, &self.inFlightFence, VK_TRUE, UINT64_MAX)
+    vkResetFences(self.device, 1, &self.inFlightFence)
+
+    var imageIndex = UInt32()
+    vkAcquireNextImageKHR(
+      self.device, self.swapChain, UINT64_MAX, self.imageAvailableSemaphore, nil, &imageIndex)
+
+    vkResetCommandBuffer(self.commandBuffer, 0)
+    recordCommandBuffer(self.commandBuffer, imageIndex)
+
+    var submitInfo = VkSubmitInfo()
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO
+
+    let waitSemaphores: [VkSemaphore?] = [self.imageAvailableSemaphore]
+    let waitStages: [VkPipelineStageFlags] = [
+      UInt32(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT.rawValue)
+    ]
+    submitInfo.waitSemaphoreCount = 1
+    submitInfo.pWaitSemaphores = waitSemaphores.withUnsafeBufferPointer { $0.baseAddress! }
+    submitInfo.pWaitDstStageMask = waitStages.withUnsafeBufferPointer { $0.baseAddress! }
+    submitInfo.commandBufferCount = 1
+    submitInfo.pCommandBuffers = withUnsafePointer(to: &self.commandBuffer) { $0 }
+
+    let signalSemaphores: [VkSemaphore?] = [renderFinishedSemaphore]
+    submitInfo.signalSemaphoreCount = 1
+    submitInfo.pSignalSemaphores = signalSemaphores.withUnsafeBufferPointer { $0.baseAddress! }
+
+    if vkQueueSubmit(self.graphicsQueue, 1, &submitInfo, self.inFlightFence) != VK_SUCCESS {
+      fatalError("Failed to submit draw command buffer!")
+    }
+
+    var presentInfo = VkPresentInfoKHR()
+    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR
+    presentInfo.waitSemaphoreCount = 1
+    presentInfo.pWaitSemaphores = signalSemaphores.withUnsafeBufferPointer { $0.baseAddress! }
+
+    let swapChains: [VkSwapchainKHR?] = [swapChain]
+    presentInfo.swapchainCount = 1
+    presentInfo.pSwapchains = swapChains.withUnsafeBufferPointer { $0.baseAddress! }
+    presentInfo.pImageIndices = withUnsafePointer(to: &imageIndex) { $0 }
+    presentInfo.pResults = nil
+
+    vkQueuePresentKHR(self.presentQueue, &presentInfo);
+  }
+
+  func createSyncObjects() {
+    var semaphoreInfo = VkSemaphoreCreateInfo()
+    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+
+    var fenceInfo = VkFenceCreateInfo()
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
+    fenceInfo.flags = UInt32(VK_FENCE_CREATE_SIGNALED_BIT.rawValue)
+
+    if vkCreateSemaphore(self.device, &semaphoreInfo, nil, &self.imageAvailableSemaphore)
+      != VK_SUCCESS
+    {
+      fatalError("Failed to create imageAvailableSemaphore!")
+    }
+
+    if vkCreateSemaphore(self.device, &semaphoreInfo, nil, &self.renderFinishedSemaphore)
+      != VK_SUCCESS
+    {
+      fatalError("Failed to create renderFinishedSemaphore!")
+    }
+
+    if vkCreateFence(self.device, &fenceInfo, nil, &self.inFlightFence) != VK_SUCCESS {
+      fatalError("Failed to create inFlightFence!")
+    }
+  }
+
+  func recordCommandBuffer(_ commandBuffer: VkCommandBuffer, _ imageIndex: UInt32) {
+    var beginInfo = VkCommandBufferBeginInfo()
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+    beginInfo.flags = 0  // Optional
+    beginInfo.pInheritanceInfo = nil  // Optional
+
+    if vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS {
+      fatalError("Failed to begin recording command buffer!")
+    }
+
+    var renderPassInfo = VkRenderPassBeginInfo()
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+    renderPassInfo.renderPass = self.renderPass
+    renderPassInfo.framebuffer = self.swapChainFramebuffers[Int(imageIndex)]
+    renderPassInfo.renderArea.offset = VkOffset2D(x: 0, y: 0)
+    renderPassInfo.renderArea.extent = self.swapChainExtent
+
+    var clearColor = VkClearValue(color: VkClearColorValue(float32: (0, 0, 0, 1)))
+    renderPassInfo.clearValueCount = 1
+    renderPassInfo.pClearValues = withUnsafePointer(to: &clearColor) { $0 }
+
+    vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE)
+
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, self.graphicsPipeline)
+
+    var viewport = VkViewport()
+    viewport.x = 0
+    viewport.y = 0
+    viewport.width = Float(self.swapChainExtent.width)
+    viewport.height = Float(self.swapChainExtent.height)
+    viewport.minDepth = 0
+    viewport.maxDepth = 1
+    vkCmdSetViewport(commandBuffer, 0, 1, &viewport)
+
+    var scissor = VkRect2D()
+    scissor.offset = VkOffset2D(x: 0, y: 0)
+    scissor.extent = self.swapChainExtent
+    vkCmdSetScissor(commandBuffer, 0, 1, &scissor)
+
+    vkCmdDraw(commandBuffer, 3, 1, 0, 0)
+
+    vkCmdEndRenderPass(commandBuffer)
+
+    if vkEndCommandBuffer(commandBuffer) != VK_SUCCESS {
+      fatalError("failed to record command buffer!")
+    }
+  }
+
+  func createCommandBuffer() {
+    var allocInfo = VkCommandBufferAllocateInfo()
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+    allocInfo.commandPool = self.commandPool
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
+    allocInfo.commandBufferCount = 1
+
+    if vkAllocateCommandBuffers(self.device, &allocInfo, &self.commandBuffer) != VK_SUCCESS {
+      fatalError("Failed to allocate command buffers!")
+    }
+  }
+
+  func createCommandPool() {
+    let queueFamilyIndices = findQueueFamilies(physicalDevice)
+
+    var poolInfo = VkCommandPoolCreateInfo()
+    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
+    poolInfo.flags = UInt32(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT.rawValue)
+    poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily!
+
+    if vkCreateCommandPool(self.device, &poolInfo, nil, &self.commandPool) != VK_SUCCESS {
+      fatalError("failed to create command pool!")
+    }
+  }
+
+  func createFrameBuffers() {
+    self.swapChainFramebuffers = Array(repeating: nil, count: self.swapChainImageViews.count)
+
+    for (i, _) in self.swapChainImageViews.enumerated() {
+      var attachments: [VkImageView?] = [
+        self.swapChainImageViews[i]
+      ]
+
+      var framebufferInfo = VkFramebufferCreateInfo()
+      framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
+      framebufferInfo.renderPass = self.renderPass
+      framebufferInfo.attachmentCount = 1
+      framebufferInfo.pAttachments = attachments.withUnsafeBufferPointer { $0.baseAddress! }
+      framebufferInfo.width = self.swapChainExtent.width
+      framebufferInfo.height = self.swapChainExtent.height
+      framebufferInfo.layers = 1
+
+      if vkCreateFramebuffer(self.device, &framebufferInfo, nil, &self.swapChainFramebuffers[i])
+        != VK_SUCCESS
+      {
+        fatalError("Failed to create framebuffer!")
+      }
+    }
   }
 
   func createRenderPass() {
+    var dependency = VkSubpassDependency()
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL
+    dependency.dstSubpass = 0
+    dependency.srcStageMask = UInt32(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT.rawValue)
+    dependency.srcAccessMask = 0
+    dependency.dstStageMask = UInt32(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT.rawValue)
+    dependency.dstAccessMask = UInt32(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT.rawValue)
+
     var colorAttachment = VkAttachmentDescription()
     colorAttachment.format = swapChainImageFormat
     colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT
@@ -77,6 +296,8 @@ class Application {
     renderPassInfo.pAttachments = withUnsafePointer(to: &colorAttachment) { $0 }
     renderPassInfo.subpassCount = 1
     renderPassInfo.pSubpasses = withUnsafePointer(to: &subpass) { $0 }
+    renderPassInfo.dependencyCount = 1
+    renderPassInfo.pDependencies = withUnsafePointer(to: &dependency) { $0 }
 
     if vkCreateRenderPass(self.device, &renderPassInfo, nil, &self.renderPass) != VK_SUCCESS {
       fatalError("Failed to create render pass!")
@@ -738,27 +959,5 @@ class Application {
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
 
     window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nil, nil)
-  }
-
-  func mainLoop() {
-    while glfwWindowShouldClose(window) == GLFW_FALSE {
-      glfwPollEvents()
-    }
-  }
-
-  func cleanup() {
-    vkDestroyPipeline(self.device, self.graphicsPipeline, nil)
-    vkDestroyPipelineLayout(self.device, self.pipelineLayout, nil)
-    vkDestroyRenderPass(self.device, self.renderPass, nil)
-    for imageView in self.swapChainImageViews {
-      vkDestroyImageView(self.device, imageView, nil)
-    }
-    vkDestroySwapchainKHR(self.device, self.swapChain, nil)
-    vkDestroyDevice(self.device, nil)
-    vkDestroySurfaceKHR(self.instance, self.surface, nil)
-    vkDestroyInstance(self.instance, nil)
-    glfwDestroyWindow(self.window)
-
-    glfwTerminate()
   }
 }

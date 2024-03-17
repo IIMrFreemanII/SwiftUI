@@ -8,7 +8,7 @@ enum ShaderUtils {
   static func compile(_ path: String) -> Data? {
     do {
       let output = try shell(to: "glslc", arguments: ["\(path) -o \(path).spv"], at: shadersPath)
-      print("Compiled \(path): \(output)")
+      print("Compiled \(path), output: \"\(output)\"")
     } catch {
       print("Failed to compile: \(path)")
       print(error)

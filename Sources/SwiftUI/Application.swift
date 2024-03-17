@@ -3,6 +3,8 @@ import CVulkan
 import Foundation
 
 class Application {
+  let MAX_FRAMES_IN_FLIGHT: Int = 2
+  var currentFrame: UInt32 = 0
   let WIDTH: Int32 = 800
   let HEIGHT: Int32 = 600
   var window: OpaquePointer!
@@ -28,10 +30,10 @@ class Application {
   var graphicsPipeline: VkPipeline!
   var swapChainFramebuffers: [VkFramebuffer?] = []
   var commandPool: VkCommandPool!
-  var commandBuffer: VkCommandBuffer!
-  var imageAvailableSemaphore: VkSemaphore!
-  var renderFinishedSemaphore: VkSemaphore!
-  var inFlightFence: VkFence!
+  var commandBuffers: [VkCommandBuffer?] = []
+  var imageAvailableSemaphores: [VkSemaphore?] = []
+  var renderFinishedSemaphores: [VkSemaphore?] = []
+  var inFlightFences: [VkFence?] = []
 
   #if DEBUG
     var enableValidationLayers = true
@@ -57,14 +59,17 @@ class Application {
     self.createGraphicsPipeline()
     self.createFrameBuffers()
     self.createCommandPool()
-    self.createCommandBuffer()
+    self.createCommandBuffers()
     self.createSyncObjects()
   }
 
   func cleanup() {
-    vkDestroySemaphore(self.device, self.imageAvailableSemaphore, nil)
-    vkDestroySemaphore(self.device, self.renderFinishedSemaphore, nil)
-    vkDestroyFence(self.device, self.inFlightFence, nil)
+    for i in 0..<self.MAX_FRAMES_IN_FLIGHT {
+      vkDestroySemaphore(self.device, self.imageAvailableSemaphores[i], nil)
+      vkDestroySemaphore(self.device, self.renderFinishedSemaphores[i], nil)
+      vkDestroyFence(self.device, self.inFlightFences[i], nil)
+    }
+
     vkDestroyCommandPool(self.device, self.commandPool, nil)
     for framebuffer in self.swapChainFramebuffers {
       vkDestroyFramebuffer(self.device, framebuffer, nil)
@@ -90,38 +95,41 @@ class Application {
       self.drawFrame()
     }
 
-    vkDeviceWaitIdle(self.device);
+    vkDeviceWaitIdle(self.device)
   }
 
   func drawFrame() {
-    vkWaitForFences(self.device, 1, &self.inFlightFence, VK_TRUE, UINT64_MAX)
-    vkResetFences(self.device, 1, &self.inFlightFence)
+    let currentFrame = Int(self.currentFrame)
+
+    vkWaitForFences(self.device, 1, &self.inFlightFences[currentFrame], VK_TRUE, UINT64_MAX)
+    vkResetFences(self.device, 1, &self.inFlightFences[currentFrame])
 
     var imageIndex = UInt32()
     vkAcquireNextImageKHR(
-      self.device, self.swapChain, UINT64_MAX, self.imageAvailableSemaphore, nil, &imageIndex)
+      self.device, self.swapChain, UINT64_MAX, self.imageAvailableSemaphores[currentFrame], nil, &imageIndex)
 
-    vkResetCommandBuffer(self.commandBuffer, 0)
-    recordCommandBuffer(self.commandBuffer, imageIndex)
+    vkResetCommandBuffer(self.commandBuffers[currentFrame], 0)
+    recordCommandBuffer(self.commandBuffers[currentFrame]!, imageIndex)
 
     var submitInfo = VkSubmitInfo()
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO
 
-    let waitSemaphores: [VkSemaphore?] = [self.imageAvailableSemaphore]
+    let waitSemaphores: [VkSemaphore?] = [self.imageAvailableSemaphores[currentFrame]]
     let waitStages: [VkPipelineStageFlags] = [
       UInt32(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT.rawValue)
     ]
     submitInfo.waitSemaphoreCount = 1
     submitInfo.pWaitSemaphores = waitSemaphores.withUnsafeBufferPointer { $0.baseAddress! }
     submitInfo.pWaitDstStageMask = waitStages.withUnsafeBufferPointer { $0.baseAddress! }
-    submitInfo.commandBufferCount = 1
-    submitInfo.pCommandBuffers = withUnsafePointer(to: &self.commandBuffer) { $0 }
 
-    let signalSemaphores: [VkSemaphore?] = [renderFinishedSemaphore]
+    submitInfo.commandBufferCount = 1
+    submitInfo.pCommandBuffers = withUnsafePointer(to: &self.commandBuffers[currentFrame]) { $0 }
+
+    let signalSemaphores: [VkSemaphore?] = [renderFinishedSemaphores[currentFrame]]
     submitInfo.signalSemaphoreCount = 1
     submitInfo.pSignalSemaphores = signalSemaphores.withUnsafeBufferPointer { $0.baseAddress! }
 
-    if vkQueueSubmit(self.graphicsQueue, 1, &submitInfo, self.inFlightFence) != VK_SUCCESS {
+    if vkQueueSubmit(self.graphicsQueue, 1, &submitInfo, self.inFlightFences[currentFrame]) != VK_SUCCESS {
       fatalError("Failed to submit draw command buffer!")
     }
 
@@ -136,10 +144,16 @@ class Application {
     presentInfo.pImageIndices = withUnsafePointer(to: &imageIndex) { $0 }
     presentInfo.pResults = nil
 
-    vkQueuePresentKHR(self.presentQueue, &presentInfo);
+    vkQueuePresentKHR(self.presentQueue, &presentInfo)
+
+    self.currentFrame = (self.currentFrame + 1) % UInt32(self.MAX_FRAMES_IN_FLIGHT)
   }
 
   func createSyncObjects() {
+    self.imageAvailableSemaphores = Array(repeating: nil, count: self.MAX_FRAMES_IN_FLIGHT)
+    self.renderFinishedSemaphores = Array(repeating: nil, count: self.MAX_FRAMES_IN_FLIGHT)
+    self.inFlightFences = Array(repeating: nil, count: self.MAX_FRAMES_IN_FLIGHT)
+
     var semaphoreInfo = VkSemaphoreCreateInfo()
     semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
 
@@ -147,20 +161,22 @@ class Application {
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
     fenceInfo.flags = UInt32(VK_FENCE_CREATE_SIGNALED_BIT.rawValue)
 
-    if vkCreateSemaphore(self.device, &semaphoreInfo, nil, &self.imageAvailableSemaphore)
-      != VK_SUCCESS
-    {
-      fatalError("Failed to create imageAvailableSemaphore!")
-    }
+    for i in 0..<self.MAX_FRAMES_IN_FLIGHT {
+      if vkCreateSemaphore(self.device, &semaphoreInfo, nil, &self.imageAvailableSemaphores[i])
+        != VK_SUCCESS
+      {
+        fatalError("Failed to create imageAvailableSemaphore!")
+      }
 
-    if vkCreateSemaphore(self.device, &semaphoreInfo, nil, &self.renderFinishedSemaphore)
-      != VK_SUCCESS
-    {
-      fatalError("Failed to create renderFinishedSemaphore!")
-    }
+      if vkCreateSemaphore(self.device, &semaphoreInfo, nil, &self.renderFinishedSemaphores[i])
+        != VK_SUCCESS
+      {
+        fatalError("Failed to create renderFinishedSemaphore!")
+      }
 
-    if vkCreateFence(self.device, &fenceInfo, nil, &self.inFlightFence) != VK_SUCCESS {
-      fatalError("Failed to create inFlightFence!")
+      if vkCreateFence(self.device, &fenceInfo, nil, &self.inFlightFences[i]) != VK_SUCCESS {
+        fatalError("Failed to create inFlightFence!")
+      }
     }
   }
 
@@ -212,14 +228,16 @@ class Application {
     }
   }
 
-  func createCommandBuffer() {
+  func createCommandBuffers() {
+    self.commandBuffers = Array(repeating: nil, count: self.MAX_FRAMES_IN_FLIGHT)
+
     var allocInfo = VkCommandBufferAllocateInfo()
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
     allocInfo.commandPool = self.commandPool
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
-    allocInfo.commandBufferCount = 1
+    allocInfo.commandBufferCount = UInt32(self.commandBuffers.count)
 
-    if vkAllocateCommandBuffers(self.device, &allocInfo, &self.commandBuffer) != VK_SUCCESS {
+    if vkAllocateCommandBuffers(self.device, &allocInfo, &self.commandBuffers) != VK_SUCCESS {
       fatalError("Failed to allocate command buffers!")
     }
   }

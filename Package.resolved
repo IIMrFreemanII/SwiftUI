@@ -1,5 +1,5 @@
 {
-  "originHash" : "45a52f7099d0f7850a3068696c6c1896a198cb616e2acb5c8c7dc125da6e5e71",
+  "originHash" : "a6ec5fae8d303bbbeb9c5218680fbc569ac72a5b8a12b73e61aad0f214992151",
   "pins" : [
     {
       "identity" : "cglfw3",
@@ -25,7 +25,7 @@
       "location" : "https://github.com/IIMrFreemanII/SwiftGLM",
       "state" : {
         "branch" : "main",
-        "revision" : "fedb4b536e584f74e81e9b624396d2689c1aa3cf"
+        "revision" : "ad25e82f6b3f3b8f493ed3768297ee64b1d7dbbe"
       }
     }
   ],

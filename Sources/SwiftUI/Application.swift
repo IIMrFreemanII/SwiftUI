@@ -1,6 +1,43 @@
 import CGLFW3
 import CVulkan
 import Foundation
+import SwiftGLM
+
+struct Vertex {
+  var pos = vec2<Float>(0, 0)
+  var color = vec3<Float>(0, 0, 0)
+
+  static func getBindingDescription() -> VkVertexInputBindingDescription {
+    var bindingDescription = VkVertexInputBindingDescription()
+    bindingDescription.binding = 0
+    bindingDescription.stride = UInt32(MemoryLayout<Vertex>.stride)
+    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX
+
+    return bindingDescription
+  }
+
+  static func getAttributeDescriptions() -> [VkVertexInputAttributeDescription] {
+    var attributeDescriptions = Array(repeating: VkVertexInputAttributeDescription(), count: 2)
+
+    attributeDescriptions[0].binding = 0
+    attributeDescriptions[0].location = 0
+    attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT
+    attributeDescriptions[0].offset = UInt32(MemoryLayout<Vertex>.offset(of: \.pos)!)
+
+    attributeDescriptions[1].binding = 0
+    attributeDescriptions[1].location = 1
+    attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT
+    attributeDescriptions[1].offset = UInt32(MemoryLayout<Vertex>.offset(of: \.color)!)
+
+    return attributeDescriptions
+  }
+}
+
+let vertices: [Vertex] = [
+  Vertex(pos: vec2<Float>(0, -0.5), color: vec3<Float>(1, 0, 0)),
+  Vertex(pos: vec2<Float>(0.5, 0.5), color: vec3<Float>(0, 1, 0)),
+  Vertex(pos: vec2<Float>(-0.5, 0.5), color: vec3<Float>(0, 0, 1)),
+]
 
 class Application {
   let MAX_FRAMES_IN_FLIGHT: Int = 2
@@ -35,6 +72,8 @@ class Application {
   var imageAvailableSemaphores: [VkSemaphore?] = []
   var renderFinishedSemaphores: [VkSemaphore?] = []
   var inFlightFences: [VkFence?] = []
+  var vertexBuffer: VkBuffer!
+  var vertexBufferMemory: VkDeviceMemory!
 
   #if DEBUG
     var enableValidationLayers = true
@@ -60,12 +99,16 @@ class Application {
     self.createGraphicsPipeline()
     self.createFrameBuffers()
     self.createCommandPool()
+    self.createVertexBuffer()
     self.createCommandBuffers()
     self.createSyncObjects()
   }
 
   func cleanup() {
     self.cleanupSwapChain()
+
+    vkDestroyBuffer(self.device, self.vertexBuffer, nil)
+    vkFreeMemory(self.device, self.vertexBufferMemory, nil)
 
     vkDestroyPipeline(self.device, self.graphicsPipeline, nil)
     vkDestroyPipelineLayout(self.device, self.pipelineLayout, nil)
@@ -171,6 +214,61 @@ class Application {
     self.currentFrame = (self.currentFrame + 1) % UInt32(self.MAX_FRAMES_IN_FLIGHT)
   }
 
+  func findMemoryType(_ typeFilter: UInt32, _ properties: VkMemoryPropertyFlags) -> UInt32 {
+    var memProperties = VkPhysicalDeviceMemoryProperties()
+    vkGetPhysicalDeviceMemoryProperties(self.physicalDevice, &memProperties)
+    let memoryTypes = Mirror(reflecting: memProperties.memoryTypes).children.map {
+      $0.value as! VkMemoryType
+    }
+
+    for i in 0..<memProperties.memoryTypeCount {
+      if (typeFilter & (1 << i)) != 0
+        && (memoryTypes[Int(i)].propertyFlags & properties) == properties
+      {
+        return i
+      }
+    }
+
+    fatalError("Failed to find suitable memory type!")
+  }
+
+  func createVertexBuffer() {
+    var bufferInfo = VkBufferCreateInfo()
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
+    bufferInfo.size = UInt64(MemoryLayout<Vertex>.stride * vertices.count)
+    bufferInfo.usage = UInt32(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT.rawValue)
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE
+
+    if vkCreateBuffer(self.device, &bufferInfo, nil, &self.vertexBuffer) != VK_SUCCESS {
+      fatalError("Failed to create vertex buffer!")
+    }
+
+    var memRequirements = VkMemoryRequirements()
+    vkGetBufferMemoryRequirements(self.device, self.vertexBuffer, &memRequirements)
+
+    var allocInfo = VkMemoryAllocateInfo()
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+    allocInfo.allocationSize = memRequirements.size
+    allocInfo.memoryTypeIndex = self.findMemoryType(
+      memRequirements.memoryTypeBits,
+      UInt32(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT.rawValue)
+        | UInt32(VK_MEMORY_PROPERTY_HOST_COHERENT_BIT.rawValue)
+    )
+
+    if vkAllocateMemory(self.device, &allocInfo, nil, &self.vertexBufferMemory) != VK_SUCCESS {
+      fatalError("Failed to allocate vertex buffer memory!")
+    }
+
+    vkBindBufferMemory(self.device, self.vertexBuffer, self.vertexBufferMemory, 0)
+
+    var data = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: 0)
+    vkMapMemory(self.device, self.vertexBufferMemory, 0, bufferInfo.size, 0, data)
+    vertices.withUnsafeBytes { src in
+      data.pointee!.copyMemory(from: src.baseAddress!, byteCount: src.count)
+    }
+    vkUnmapMemory(self.device, self.vertexBufferMemory)
+  }
+
   func createSyncObjects() {
     self.imageAvailableSemaphores = Array(repeating: nil, count: self.MAX_FRAMES_IN_FLIGHT)
     self.renderFinishedSemaphores = Array(repeating: nil, count: self.MAX_FRAMES_IN_FLIGHT)
@@ -241,7 +339,11 @@ class Application {
     scissor.extent = self.swapChainExtent
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor)
 
-    vkCmdDraw(commandBuffer, 3, 1, 0, 0)
+    let vertexBuffers: [VkBuffer?] = [self.vertexBuffer]
+    let offsets: [VkDeviceSize] = [0]
+    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets)
+
+    vkCmdDraw(commandBuffer, UInt32(vertices.count), 1, 0, 0)
 
     vkCmdEndRenderPass(commandBuffer)
 
@@ -368,12 +470,17 @@ class Application {
       vertShaderStageInfo, fragShaderStageInfo,
     ]
 
+    var bindingDescription = Vertex.getBindingDescription()
+    let attributeDescriptions = Vertex.getAttributeDescriptions()
+
     var vertexInputInfo = VkPipelineVertexInputStateCreateInfo()
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
-    vertexInputInfo.vertexBindingDescriptionCount = 0
-    vertexInputInfo.pVertexBindingDescriptions = nil  // Optional
-    vertexInputInfo.vertexAttributeDescriptionCount = 0
-    vertexInputInfo.pVertexAttributeDescriptions = nil  // Optional
+    vertexInputInfo.vertexBindingDescriptionCount = 1
+    vertexInputInfo.pVertexBindingDescriptions = withUnsafePointer(to: &bindingDescription) { $0 }
+    vertexInputInfo.vertexAttributeDescriptionCount = UInt32(attributeDescriptions.count)
+    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.withUnsafeBufferPointer {
+      $0.baseAddress!
+    }
 
     let dynamicStates: [VkDynamicState] = [
       VK_DYNAMIC_STATE_VIEWPORT,

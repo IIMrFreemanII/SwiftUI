@@ -232,41 +232,102 @@ class Application {
     fatalError("Failed to find suitable memory type!")
   }
 
-  func createVertexBuffer() {
+  func copyBuffer(_ srcBuffer: VkBuffer, _ dstBuffer: VkBuffer, _ size: VkDeviceSize) {
+    var allocInfo = VkCommandBufferAllocateInfo()
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
+    allocInfo.commandPool = self.commandPool
+    allocInfo.commandBufferCount = 1
+
+    var commandBuffer: VkCommandBuffer?
+    vkAllocateCommandBuffers(self.device, &allocInfo, &commandBuffer)
+
+    var beginInfo = VkCommandBufferBeginInfo()
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+    beginInfo.flags = UInt32(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT.rawValue)
+
+    vkBeginCommandBuffer(commandBuffer, &beginInfo)
+
+    var copyRegion = VkBufferCopy()
+    copyRegion.srcOffset = 0  // Optional
+    copyRegion.dstOffset = 0  // Optional
+    copyRegion.size = size
+    vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion)
+
+    vkEndCommandBuffer(commandBuffer)
+
+    var submitInfo = VkSubmitInfo()
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO
+    submitInfo.commandBufferCount = 1
+    submitInfo.pCommandBuffers = withUnsafePointer(to: &commandBuffer) { $0 }
+
+    vkQueueSubmit(self.graphicsQueue, 1, &submitInfo, nil)
+    vkQueueWaitIdle(self.graphicsQueue)
+
+    vkFreeCommandBuffers(self.device, self.commandPool, 1, &commandBuffer)
+  }
+
+  func createBuffer(
+    _ size: VkDeviceSize, _ usage: VkBufferUsageFlags, _ properties: VkMemoryPropertyFlags,
+    _ buffer: inout VkBuffer?, _ bufferMemory: inout VkDeviceMemory?
+  ) {
     var bufferInfo = VkBufferCreateInfo()
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
-    bufferInfo.size = UInt64(MemoryLayout<Vertex>.stride * vertices.count)
-    bufferInfo.usage = UInt32(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT.rawValue)
+    bufferInfo.size = size
+    bufferInfo.usage = usage
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE
 
-    if vkCreateBuffer(self.device, &bufferInfo, nil, &self.vertexBuffer) != VK_SUCCESS {
+    if vkCreateBuffer(self.device, &bufferInfo, nil, &buffer) != VK_SUCCESS {
       fatalError("Failed to create vertex buffer!")
     }
 
     var memRequirements = VkMemoryRequirements()
-    vkGetBufferMemoryRequirements(self.device, self.vertexBuffer, &memRequirements)
+    vkGetBufferMemoryRequirements(self.device, buffer, &memRequirements)
 
     var allocInfo = VkMemoryAllocateInfo()
     allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
     allocInfo.allocationSize = memRequirements.size
     allocInfo.memoryTypeIndex = self.findMemoryType(
       memRequirements.memoryTypeBits,
-      UInt32(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT.rawValue)
-        | UInt32(VK_MEMORY_PROPERTY_HOST_COHERENT_BIT.rawValue)
+      properties
     )
 
-    if vkAllocateMemory(self.device, &allocInfo, nil, &self.vertexBufferMemory) != VK_SUCCESS {
+    if vkAllocateMemory(self.device, &allocInfo, nil, &bufferMemory) != VK_SUCCESS {
       fatalError("Failed to allocate vertex buffer memory!")
     }
 
-    vkBindBufferMemory(self.device, self.vertexBuffer, self.vertexBufferMemory, 0)
+    vkBindBufferMemory(self.device, buffer, bufferMemory, 0)
+  }
 
-    var data = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: 0)
-    vkMapMemory(self.device, self.vertexBufferMemory, 0, bufferInfo.size, 0, data)
+  func createVertexBuffer() {
+    let bufferSize: VkDeviceSize = UInt64(MemoryLayout<Vertex>.stride * vertices.count)
+
+    var stagingBuffer: VkBuffer?
+    var stagingBufferMemory: VkDeviceMemory?
+
+    self.createBuffer(
+      bufferSize, UInt32(VK_BUFFER_USAGE_TRANSFER_SRC_BIT.rawValue),
+      UInt32(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT.rawValue)
+        | UInt32(VK_MEMORY_PROPERTY_HOST_COHERENT_BIT.rawValue), &stagingBuffer,
+      &stagingBufferMemory)
+
+    let data = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: 0)
+    vkMapMemory(self.device, stagingBufferMemory, 0, bufferSize, 0, data)
     vertices.withUnsafeBytes { src in
       data.pointee!.copyMemory(from: src.baseAddress!, byteCount: src.count)
     }
-    vkUnmapMemory(self.device, self.vertexBufferMemory)
+    vkUnmapMemory(self.device, stagingBufferMemory)
+
+    self.createBuffer(
+      bufferSize,
+      UInt32(VK_BUFFER_USAGE_TRANSFER_DST_BIT.rawValue)
+        | UInt32(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT.rawValue),
+      UInt32(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue), &vertexBuffer, &vertexBufferMemory)
+
+    copyBuffer(stagingBuffer!, self.vertexBuffer, bufferSize)
+
+    vkDestroyBuffer(self.device, stagingBuffer, nil)
+    vkFreeMemory(self.device, stagingBufferMemory, nil)
   }
 
   func createSyncObjects() {

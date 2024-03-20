@@ -34,9 +34,14 @@ struct Vertex {
 }
 
 let vertices: [Vertex] = [
-  Vertex(pos: vec2<Float>(0, -0.5), color: vec3<Float>(1, 0, 0)),
-  Vertex(pos: vec2<Float>(0.5, 0.5), color: vec3<Float>(0, 1, 0)),
-  Vertex(pos: vec2<Float>(-0.5, 0.5), color: vec3<Float>(0, 0, 1)),
+  Vertex(pos: vec2<Float>(-0.5, -0.5), color: vec3<Float>(1, 0, 0)),
+  Vertex(pos: vec2<Float>(0.5, -0.5), color: vec3<Float>(0, 1, 0)),
+  Vertex(pos: vec2<Float>(0.5, 0.5), color: vec3<Float>(0, 0, 1)),
+  Vertex(pos: vec2<Float>(-0.5, 0.5), color: vec3<Float>(1, 1, 1)),
+]
+
+let indices: [UInt16] = [
+  0, 1, 2, 2, 3, 0,
 ]
 
 class Application {
@@ -74,6 +79,8 @@ class Application {
   var inFlightFences: [VkFence?] = []
   var vertexBuffer: VkBuffer!
   var vertexBufferMemory: VkDeviceMemory!
+  var indexBuffer: VkBuffer!
+  var indexBufferMemory: VkDeviceMemory!
 
   #if DEBUG
     var enableValidationLayers = true
@@ -100,12 +107,16 @@ class Application {
     self.createFrameBuffers()
     self.createCommandPool()
     self.createVertexBuffer()
+    self.createIndexBuffer()
     self.createCommandBuffers()
     self.createSyncObjects()
   }
 
   func cleanup() {
     self.cleanupSwapChain()
+
+    vkDestroyBuffer(self.device, self.indexBuffer, nil);
+    vkFreeMemory(self.device, self.indexBufferMemory, nil);
 
     vkDestroyBuffer(self.device, self.vertexBuffer, nil)
     vkFreeMemory(self.device, self.vertexBufferMemory, nil)
@@ -299,6 +310,37 @@ class Application {
     vkBindBufferMemory(self.device, buffer, bufferMemory, 0)
   }
 
+  func createIndexBuffer() {
+    let bufferSize: VkDeviceSize = UInt64(MemoryLayout<UInt16>.stride * indices.count)
+
+    var stagingBuffer: VkBuffer?
+    var stagingBufferMemory: VkDeviceMemory?
+
+    self.createBuffer(
+      bufferSize, UInt32(VK_BUFFER_USAGE_TRANSFER_SRC_BIT.rawValue),
+      UInt32(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT.rawValue)
+        | UInt32(VK_MEMORY_PROPERTY_HOST_COHERENT_BIT.rawValue), &stagingBuffer,
+      &stagingBufferMemory)
+
+    let data = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: 0)
+    vkMapMemory(self.device, stagingBufferMemory, 0, bufferSize, 0, data)
+    indices.withUnsafeBytes { src in
+      data.pointee!.copyMemory(from: src.baseAddress!, byteCount: src.count)
+    }
+    vkUnmapMemory(self.device, stagingBufferMemory)
+
+    self.createBuffer(
+      bufferSize,
+      UInt32(VK_BUFFER_USAGE_TRANSFER_DST_BIT.rawValue)
+        | UInt32(VK_BUFFER_USAGE_INDEX_BUFFER_BIT.rawValue),
+      UInt32(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue), &self.indexBuffer, &self.indexBufferMemory)
+
+    copyBuffer(stagingBuffer!, self.indexBuffer, bufferSize)
+
+    vkDestroyBuffer(self.device, stagingBuffer, nil)
+    vkFreeMemory(self.device, stagingBufferMemory, nil)
+  }
+
   func createVertexBuffer() {
     let bufferSize: VkDeviceSize = UInt64(MemoryLayout<Vertex>.stride * vertices.count)
 
@@ -322,7 +364,7 @@ class Application {
       bufferSize,
       UInt32(VK_BUFFER_USAGE_TRANSFER_DST_BIT.rawValue)
         | UInt32(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT.rawValue),
-      UInt32(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue), &vertexBuffer, &vertexBufferMemory)
+      UInt32(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue), &self.vertexBuffer, &self.vertexBufferMemory)
 
     copyBuffer(stagingBuffer!, self.vertexBuffer, bufferSize)
 
@@ -403,8 +445,9 @@ class Application {
     let vertexBuffers: [VkBuffer?] = [self.vertexBuffer]
     let offsets: [VkDeviceSize] = [0]
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets)
+    vkCmdBindIndexBuffer(commandBuffer, self.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
-    vkCmdDraw(commandBuffer, UInt32(vertices.count), 1, 0, 0)
+    vkCmdDrawIndexed(commandBuffer, UInt32(indices.count), 1, 0, 0, 0)
 
     vkCmdEndRenderPass(commandBuffer)
 

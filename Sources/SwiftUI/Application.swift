@@ -3,6 +3,12 @@ import CVulkan
 import Foundation
 import SwiftGLM
 
+struct UniformBufferObject {
+  var model = mat4()
+  var view = mat4()
+  var proj = mat4()
+}
+
 struct Vertex {
   var pos = vec2<Float>(0, 0)
   var color = vec3<Float>(0, 0, 0)
@@ -69,6 +75,7 @@ class Application {
   var swapChainExtent: VkExtent2D!
   var swapChainImageViews: [VkImageView?] = []
   var renderPass: VkRenderPass!
+  var descriptorSetLayout: VkDescriptorSetLayout!
   var pipelineLayout: VkPipelineLayout!
   var graphicsPipeline: VkPipeline!
   var swapChainFramebuffers: [VkFramebuffer?] = []
@@ -81,6 +88,13 @@ class Application {
   var vertexBufferMemory: VkDeviceMemory!
   var indexBuffer: VkBuffer!
   var indexBufferMemory: VkDeviceMemory!
+
+  var uniformBuffers: [VkBuffer?] = []
+  var uniformBuffersMemory: [VkDeviceMemory?] = []
+  var uniformBuffersMapped: [UnsafeMutableRawPointer?] = []
+
+  var descriptorPool: VkDescriptorPool!
+  var descriptorSets: [VkDescriptorSet?] = []
 
   #if DEBUG
     var enableValidationLayers = true
@@ -103,11 +117,15 @@ class Application {
     self.createSwapChain()
     self.createImageViews()
     self.createRenderPass()
+    self.createDescriptorSetLayout()
     self.createGraphicsPipeline()
     self.createFrameBuffers()
     self.createCommandPool()
     self.createVertexBuffer()
     self.createIndexBuffer()
+    self.createUniformBuffers()
+    self.createDescriptorPool()
+    self.createDescriptorSets()
     self.createCommandBuffers()
     self.createSyncObjects()
   }
@@ -115,8 +133,16 @@ class Application {
   func cleanup() {
     self.cleanupSwapChain()
 
-    vkDestroyBuffer(self.device, self.indexBuffer, nil);
-    vkFreeMemory(self.device, self.indexBufferMemory, nil);
+    for i in 0..<MAX_FRAMES_IN_FLIGHT {
+      vkDestroyBuffer(self.device, self.uniformBuffers[i], nil)
+      vkFreeMemory(self.device, self.uniformBuffersMemory[i], nil)
+    }
+
+    vkDestroyDescriptorPool(self.device, self.descriptorPool, nil)
+    vkDestroyDescriptorSetLayout(self.device, self.descriptorSetLayout, nil)
+
+    vkDestroyBuffer(self.device, self.indexBuffer, nil)
+    vkFreeMemory(self.device, self.indexBufferMemory, nil)
 
     vkDestroyBuffer(self.device, self.vertexBuffer, nil)
     vkFreeMemory(self.device, self.vertexBufferMemory, nil)
@@ -177,6 +203,8 @@ class Application {
     vkResetCommandBuffer(self.commandBuffers[currentFrame], 0)
     recordCommandBuffer(self.commandBuffers[currentFrame]!, imageIndex)
 
+    self.updateUniformBuffer(currentFrame)
+
     var submitInfo = VkSubmitInfo()
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO
 
@@ -223,6 +251,127 @@ class Application {
     }
 
     self.currentFrame = (self.currentFrame + 1) % UInt32(self.MAX_FRAMES_IN_FLIGHT)
+  }
+
+  func createDescriptorSets() {
+    let layouts: [VkDescriptorSetLayout?] = Array(
+      repeating: self.descriptorSetLayout, count: self.MAX_FRAMES_IN_FLIGHT
+    )
+
+    var allocInfo = VkDescriptorSetAllocateInfo()
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
+    allocInfo.descriptorPool = self.descriptorPool
+    allocInfo.descriptorSetCount = UInt32(self.MAX_FRAMES_IN_FLIGHT)
+    allocInfo.pSetLayouts = layouts.withUnsafeBufferPointer { $0.baseAddress! }
+
+    self.descriptorSets = Array(repeating: nil, count: self.MAX_FRAMES_IN_FLIGHT)
+    if vkAllocateDescriptorSets(self.device, &allocInfo, &self.descriptorSets) != VK_SUCCESS {
+      fatalError("Failed to allocate descriptor sets!")
+    }
+
+    for i in 0..<self.MAX_FRAMES_IN_FLIGHT {
+      var bufferInfo = VkDescriptorBufferInfo()
+      bufferInfo.buffer = self.uniformBuffers[i]
+      bufferInfo.offset = 0
+      bufferInfo.range = UInt64(MemoryLayout<UniformBufferObject>.stride)
+
+      var descriptorWrite = VkWriteDescriptorSet()
+      descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+      descriptorWrite.dstSet = self.descriptorSets[i]
+      descriptorWrite.dstBinding = 0
+      descriptorWrite.dstArrayElement = 0
+
+      descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+      descriptorWrite.descriptorCount = 1
+
+      descriptorWrite.pBufferInfo = withUnsafePointer(to: &bufferInfo) { $0 }
+      descriptorWrite.pImageInfo = nil  // Optional
+      descriptorWrite.pTexelBufferView = nil  // Optional
+
+      vkUpdateDescriptorSets(self.device, 1, &descriptorWrite, 0, nil)
+    }
+  }
+
+  func createDescriptorPool() {
+    var poolSize = VkDescriptorPoolSize()
+    poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+    poolSize.descriptorCount = UInt32(MAX_FRAMES_IN_FLIGHT)
+
+    var poolInfo = VkDescriptorPoolCreateInfo()
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+    poolInfo.poolSizeCount = 1
+    poolInfo.pPoolSizes = withUnsafePointer(to: &poolSize) { $0 }
+    poolInfo.maxSets = UInt32(MAX_FRAMES_IN_FLIGHT)
+
+    if vkCreateDescriptorPool(self.device, &poolInfo, nil, &self.descriptorPool) != VK_SUCCESS {
+      fatalError("Failed to create descriptor pool!")
+    }
+  }
+
+  var startTime = mach_absolute_time()
+  func updateUniformBuffer(_ currentImage: Int) {
+    var timebaseInfo = mach_timebase_info_data_t()
+    mach_timebase_info(&timebaseInfo)
+
+    let currentTime = mach_absolute_time()
+
+    let elapsedNanoseconds =
+      (currentTime - self.startTime) * UInt64(timebaseInfo.numer) / UInt64(timebaseInfo.denom)
+    let seconds = Double(elapsedNanoseconds) / 1_000_000_000.0  // Convert to seconds
+    let time = Float(seconds)
+
+    var ubo = UniformBufferObject()
+    ubo.model = rotateZ(radians(time * 90))
+    ubo.view = lookAt(eye: vec3f(2, 2, 2), center: vec3f(0, 0, 0), up: .forward)
+    ubo.proj = perspective(
+      fov: radians(45), near: 0.1, far: 10,
+      aspect: Float(swapChainExtent.width) / Float(swapChainExtent.height)
+    )
+    ubo.proj[1][1] *= -1;
+
+    withUnsafeBytes(of: &ubo) { src in
+      self.uniformBuffersMapped[currentImage]!.copyMemory(
+        from: src.baseAddress!, byteCount: src.count)
+    }
+  }
+
+  func createUniformBuffers() {
+    let bufferSize: VkDeviceSize = UInt64(MemoryLayout<UniformBufferObject>.stride)
+
+    self.uniformBuffers = Array(repeating: nil, count: MAX_FRAMES_IN_FLIGHT)
+    self.uniformBuffersMemory = Array(repeating: nil, count: MAX_FRAMES_IN_FLIGHT)
+    self.uniformBuffersMapped = Array(repeating: nil, count: MAX_FRAMES_IN_FLIGHT)
+
+    for i in 0..<MAX_FRAMES_IN_FLIGHT {
+      createBuffer(
+        bufferSize, UInt32(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT.rawValue),
+        UInt32(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT.rawValue)
+          | UInt32(VK_MEMORY_PROPERTY_HOST_COHERENT_BIT.rawValue), &self.uniformBuffers[i],
+        &self.uniformBuffersMemory[i]
+      )
+      vkMapMemory(
+        self.device, self.uniformBuffersMemory[i], 0, bufferSize, 0, &self.uniformBuffersMapped[i])
+    }
+  }
+
+  func createDescriptorSetLayout() {
+    var uboLayoutBinding = VkDescriptorSetLayoutBinding()
+    uboLayoutBinding.binding = 0
+    uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+    uboLayoutBinding.descriptorCount = 1
+    uboLayoutBinding.stageFlags = UInt32(VK_SHADER_STAGE_VERTEX_BIT.rawValue)
+    uboLayoutBinding.pImmutableSamplers = nil  // Optional
+
+    var layoutInfo = VkDescriptorSetLayoutCreateInfo()
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+    layoutInfo.bindingCount = 1
+    layoutInfo.pBindings = withUnsafePointer(to: &uboLayoutBinding) { $0 }
+
+    if vkCreateDescriptorSetLayout(self.device, &layoutInfo, nil, &self.descriptorSetLayout)
+      != VK_SUCCESS
+    {
+      fatalError("Failed to create descriptor set layout!")
+    }
   }
 
   func findMemoryType(_ typeFilter: UInt32, _ properties: VkMemoryPropertyFlags) -> UInt32 {
@@ -333,7 +482,8 @@ class Application {
       bufferSize,
       UInt32(VK_BUFFER_USAGE_TRANSFER_DST_BIT.rawValue)
         | UInt32(VK_BUFFER_USAGE_INDEX_BUFFER_BIT.rawValue),
-      UInt32(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue), &self.indexBuffer, &self.indexBufferMemory)
+      UInt32(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue), &self.indexBuffer,
+      &self.indexBufferMemory)
 
     copyBuffer(stagingBuffer!, self.indexBuffer, bufferSize)
 
@@ -364,7 +514,8 @@ class Application {
       bufferSize,
       UInt32(VK_BUFFER_USAGE_TRANSFER_DST_BIT.rawValue)
         | UInt32(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT.rawValue),
-      UInt32(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue), &self.vertexBuffer, &self.vertexBufferMemory)
+      UInt32(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue), &self.vertexBuffer,
+      &self.vertexBufferMemory)
 
     copyBuffer(stagingBuffer!, self.vertexBuffer, bufferSize)
 
@@ -445,7 +596,18 @@ class Application {
     let vertexBuffers: [VkBuffer?] = [self.vertexBuffer]
     let offsets: [VkDeviceSize] = [0]
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets)
-    vkCmdBindIndexBuffer(commandBuffer, self.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdBindIndexBuffer(commandBuffer, self.indexBuffer, 0, VK_INDEX_TYPE_UINT16)
+
+    vkCmdBindDescriptorSets(
+      commandBuffer,
+      VK_PIPELINE_BIND_POINT_GRAPHICS,
+      self.pipelineLayout,
+      0,
+      1,
+      &descriptorSets[Int(currentFrame)],
+      0,
+      nil
+    )
 
     vkCmdDrawIndexed(commandBuffer, UInt32(indices.count), 1, 0, 0, 0)
 
@@ -668,8 +830,8 @@ class Application {
 
     var pipelineLayoutInfo = VkPipelineLayoutCreateInfo()
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
-    pipelineLayoutInfo.setLayoutCount = 0  // Optional
-    pipelineLayoutInfo.pSetLayouts = nil  // Optional
+    pipelineLayoutInfo.setLayoutCount = 1
+    pipelineLayoutInfo.pSetLayouts = withUnsafePointer(to: &self.descriptorSetLayout) { $0 }
     pipelineLayoutInfo.pushConstantRangeCount = 0  // Optional
     pipelineLayoutInfo.pPushConstantRanges = nil  // Optional
 

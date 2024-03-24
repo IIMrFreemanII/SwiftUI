@@ -3,6 +3,14 @@ import CVulkan
 import Foundation
 import SwiftGLM
 
+func memcpy<T>(from src: inout T, to dst: UnsafeMutableRawPointer) {
+  dst.copyMemory(from: &src, byteCount: MemoryLayout<T>.size)
+}
+
+func memcpy<T>(from src: inout [T], to dst: UnsafeMutableRawPointer) {
+  dst.copyMemory(from: &src, byteCount: MemoryLayout<T>.stride * src.count)
+}
+
 struct UniformBufferObject {
   var model = mat4()
   var view = mat4()
@@ -39,14 +47,14 @@ struct Vertex {
   }
 }
 
-let vertices: [Vertex] = [
+var vertices: [Vertex] = [
   Vertex(pos: vec2<Float>(-0.5, -0.5), color: vec3<Float>(1, 0, 0)),
   Vertex(pos: vec2<Float>(0.5, -0.5), color: vec3<Float>(0, 1, 0)),
   Vertex(pos: vec2<Float>(0.5, 0.5), color: vec3<Float>(0, 0, 1)),
   Vertex(pos: vec2<Float>(-0.5, 0.5), color: vec3<Float>(1, 1, 1)),
 ]
 
-let indices: [UInt16] = [
+var indices: [UInt16] = [
   0, 1, 2, 2, 3, 0,
 ]
 
@@ -327,12 +335,9 @@ class Application {
       fov: radians(45), near: 0.1, far: 10,
       aspect: Float(swapChainExtent.width) / Float(swapChainExtent.height)
     )
-    ubo.proj[1][1] *= -1;
+    ubo.proj[1][1] *= -1
 
-    withUnsafeBytes(of: &ubo) { src in
-      self.uniformBuffersMapped[currentImage]!.copyMemory(
-        from: src.baseAddress!, byteCount: src.count)
-    }
+    memcpy(from: &ubo, to: self.uniformBuffersMapped[currentImage]!)
   }
 
   func createUniformBuffers() {
@@ -473,9 +478,7 @@ class Application {
 
     let data = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: 0)
     vkMapMemory(self.device, stagingBufferMemory, 0, bufferSize, 0, data)
-    indices.withUnsafeBytes { src in
-      data.pointee!.copyMemory(from: src.baseAddress!, byteCount: src.count)
-    }
+    memcpy(from: &indices, to: data.pointee!)
     vkUnmapMemory(self.device, stagingBufferMemory)
 
     self.createBuffer(
@@ -505,9 +508,7 @@ class Application {
 
     let data = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: 0)
     vkMapMemory(self.device, stagingBufferMemory, 0, bufferSize, 0, data)
-    vertices.withUnsafeBytes { src in
-      data.pointee!.copyMemory(from: src.baseAddress!, byteCount: src.count)
-    }
+    memcpy(from: &vertices, to: data.pointee!) 
     vkUnmapMemory(self.device, stagingBufferMemory)
 
     self.createBuffer(

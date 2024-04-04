@@ -510,7 +510,7 @@ class Application {
 
     let data = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: 0)
     vkMapMemory(self.device, stagingBufferMemory, 0, bufferSize, 0, data)
-    memcpy(from: &vertices, to: data.pointee!) 
+    memcpy(from: &vertices, to: data.pointee!)
     vkUnmapMemory(self.device, stagingBufferMemory)
 
     self.createBuffer(

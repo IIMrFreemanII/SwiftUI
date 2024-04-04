@@ -3,6 +3,13 @@ import CVulkan
 import Foundation
 import SwiftGLM
 
+struct Time {
+  static var time = Double()
+  static var deltaTime = Double()
+  static var startTime = Double()
+  static var prevTime = Double()
+}
+
 func memcpy<T>(from src: inout T, to dst: UnsafeMutableRawPointer) {
   dst.copyMemory(from: &src, byteCount: MemoryLayout<T>.size)
 }
@@ -181,6 +188,12 @@ class Application {
   func mainLoop() {
     while glfwWindowShouldClose(window) == GLFW_FALSE {
       glfwPollEvents()
+      let endTime = glfwGetTime()
+      Time.time = endTime - Time.startTime
+      Time.deltaTime = endTime - Time.prevTime
+      Time.prevTime = endTime
+      // print("deltaTime: \(Time.deltaTime * 1_000_000)")
+      // print("time: \(Time.time)")
       self.drawFrame()
     }
 
@@ -316,20 +329,9 @@ class Application {
     }
   }
 
-  var startTime = mach_absolute_time()
   func updateUniformBuffer(_ currentImage: Int) {
-    var timebaseInfo = mach_timebase_info_data_t()
-    mach_timebase_info(&timebaseInfo)
-
-    let currentTime = mach_absolute_time()
-
-    let elapsedNanoseconds =
-      (currentTime - self.startTime) * UInt64(timebaseInfo.numer) / UInt64(timebaseInfo.denom)
-    let seconds = Double(elapsedNanoseconds) / 1_000_000_000.0  // Convert to seconds
-    let time = Float(seconds)
-
     var ubo = UniformBufferObject()
-    ubo.model = rotateZ(radians(time * 90))
+    ubo.model = rotateZ(radians(Float(Time.time) * 90))
     ubo.view = lookAt(eye: vec3f(2, 2, 2), center: vec3f(0, 0, 0), up: .forward)
     ubo.proj = perspective(
       fov: radians(45), near: 0.1, far: 10,
@@ -1398,6 +1400,8 @@ class Application {
 
   func initWindow() {
     glfwInit()
+    Time.startTime = glfwGetTime()
+    Time.prevTime = glfwGetTime()
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
 

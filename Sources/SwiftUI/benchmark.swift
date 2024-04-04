@@ -1,15 +1,15 @@
-import Foundation
+import CppUtils
 
 func benchmark(title: String, operation: () -> Void) {
-  var timebaseInfo = mach_timebase_info_data_t()
-  mach_timebase_info(&timebaseInfo)
-
-  let startTime = mach_absolute_time()
+  // let start = glfwGetTime()
+  CppUtils.startTime()
   operation()
-  let timeElapsed = mach_absolute_time()
+  let result = CppUtils.endTime()
+  print("\(title): \(String(format: "%.3f", result)) us")
+  // let end = glfwGetTime()
+  // let seconds = end - start
+  // let microSeconds = seconds * 1_000_000
+  // let elapsedTime = microSeconds
 
-  let elapsedNanoseconds =
-    (timeElapsed - startTime) * UInt64(timebaseInfo.numer) / UInt64(timebaseInfo.denom)
-  let macro_seconds = Double(elapsedNanoseconds) / 1_000.0  // Convert to macro seconds
-  print("\(title): \(String(format: "%.3f", macro_seconds)) us")
+  // print("\(title): \(String(format: "%.3f", elapsedTime)) us")
 }
